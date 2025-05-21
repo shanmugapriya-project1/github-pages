@@ -1,0 +1,181 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime, timedelta
+
+# --- 1. Data Generation (Simulated Data) ---
+# In a real scenario, you would load data from CSV, databases, APIs, etc.
+# Example: df = pd.read_csv('historical_accidents.csv')
+
+def generate_simulated_data(num_records=1000):
+    np.random.seed(42) # for reproducibility
+
+    data = {
+        'accident_id': range(num_records),
+        'date': [datetime(2023, 1, 1) + timedelta(days=np.random.randint(0, 365)) for _ in range(num_records)],
+        'time_of_day_hour': np.random.randint(0, 24, num_records),
+        'road_type': np.random.choice(['Highway', 'Urban Street', 'Rural Road'], num_records, p=[0.4, 0.4, 0.2]),
+        'weather_condition': np.random.choice(['Clear', 'Rainy', 'Foggy', 'Snowy'], num_records, p=[0.6, 0.25, 0.1, 0.05]),
+        'speed_limit_mph': np.random.choice([30, 45, 60, 75], num_records, p=[0.25, 0.25, 0.25, 0.25]),
+        'num_vehicles_involved': np.random.randint(1, 5, num_records),
+        'junction_type': np.random.choice(['Crossroads', 'T-Junction', 'Roundabout', 'None'], num_records, p=[0.3, 0.2, 0.1, 0.4]),
+        'driver_age_group': np.random.choice(['<25', '25-50', '>50'], num_records, p=[0.2, 0.5, 0.3]),
+        'severity': np.random.choice(['Minor', 'Serious', 'Fatal'], num_records, p=[0.6, 0.3, 0.1])
+    }
+    df = pd.DataFrame(data)
+
+    # Introduce some correlations for more realistic simulation
+    # Fatal accidents more likely on highways, at higher speeds, or in bad weather
+    df.loc[(df['road_type'] == 'Highway') & (df['speed_limit_mph'] >= 60) & (df['severity'] != 'Fatal'), 'severity'] = \
+        np.random.choice(['Minor', 'Serious', 'Fatal'], len(df.loc[(df['road_type'] == 'Highway') & (df['speed_limit_mph'] >= 60) & (df['severity'] != 'Fatal')]), p=[0.4, 0.4, 0.2])
+    df.loc[(df['weather_condition'].isin(['Rainy', 'Snowy', 'Foggy'])) & (df['severity'] == 'Minor'), 'severity'] = \
+        np.random.choice(['Serious', 'Fatal'], len(df.loc[(df['weather_condition'].isin(['Rainy', 'Snowy', 'Foggy'])) & (df['severity'] == 'Minor')]), p=[0.8, 0.2])
+
+    return df
+
+print("--- Generating Simulated Data ---")
+df = generate_simulated_data(num_records=5000)
+print(f"Generated {len(df)} records.")
+print(df.head())
+print("\n--- Data Info ---")
+df.info()
+
+# --- 2. Data Preprocessing ---
+print("\n--- Data Preprocessing ---")
+
+# Convert categorical features to numerical using One-Hot Encoding
+# This is crucial for most ML models
+categorical_cols = ['road_type', 'weather_condition', 'junction_type', 'driver_age_group']
+df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=True) # drop_first avoids multicollinearity
+
+# Map target 'severity' to numerical values
+severity_mapping = {'Minor': 0, 'Serious': 1, 'Fatal': 2}
+df_encoded['severity_encoded'] = df_encoded['severity'].map(severity_mapping)
+
+# Drop original 'severity' and 'date' (unless date features like month/day of week are extracted)
+# For simplicity, we drop 'date' directly here. In a real system, you'd extract temporal features.
+X = df_encoded.drop(['accident_id', 'date', 'severity', 'severity_encoded'], axis=1)
+y = df_encoded['severity_encoded']
+
+print(f"Features after encoding: {X.columns.tolist()}")
+print(f"Shape of features (X): {X.shape}")
+print(f"Shape of target (y): {y.shape}")
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y) # stratify for balanced classes
+
+print(f"Training set size: {len(X_train)} samples")
+print(f"Testing set size: {len(X_test)} samples")
+
+# --- 3. Model Training (Accident Severity Prediction) ---
+print("\n--- Model Training (Random Forest Classifier) ---")
+
+# Initialize and train a Random Forest Classifier
+model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced') # 'balanced' helps with imbalanced classes
+model.fit(X_train, y_train)
+
+print("Model training complete.")
+
+# --- 4. Prediction and Evaluation ---
+print("\n--- Model Prediction and Evaluation ---")
+
+# Make predictions on the test set
+y_pred = model.predict(X_test)
+
+# Evaluate the model
+accuracy = accuracy_score(y_test, y_pred)
+class_report = classification_report(y_test, y_pred, target_names=['Minor', 'Serious', 'Fatal'])
+conf_matrix = confusion_matrix(y_test, y_pred)
+
+print(f"Accuracy: {accuracy:.4f}")
+print("\nClassification Report:\n", class_report)
+print("\nConfusion Matrix:\n", conf_matrix)
+
+# --- 5. Basic Analysis & Visualization ---
+print("\n--- Basic Analysis & Visualization ---")
+
+# Feature Importance
+feature_importances = pd.Series(model.feature_importances_, index=X.columns).sort_values(ascending=False)
+plt.figure(figsize=(10, 6))
+sns.barplot(x=feature_importances, y=feature_importances.index)
+plt.title('Feature Importances for Accident Severity Prediction')
+plt.xlabel('Importance')
+plt.ylabel('Feature')
+plt.tight_layout()
+plt.show()
+
+# Distribution of Severity
+plt.figure(figsize=(7, 5))
+sns.countplot(x='severity', data=df, palette='viridis', order=['Minor', 'Serious', 'Fatal'])
+plt.title('Distribution of Accident Severity')
+plt.xlabel('Severity')
+plt.ylabel('Number of Accidents')
+plt.show()
+
+# Example: Accident counts by Weather Condition
+plt.figure(figsize=(10, 6))
+sns.countplot(x='weather_condition', hue='severity', data=df, palette='magma')
+plt.title('Accidents by Weather Condition and Severity')
+plt.xlabel('Weather Condition')
+plt.ylabel('Number of Accidents')
+plt.legend(title='Severity')
+plt.show()
+
+
+# --- Example of making a single prediction ---
+print("\n--- Example: Making a Single Prediction ---")
+
+# Create a dummy new data point (ensure it has the same columns as X_train)
+# For a real application, this would come from real-time sensors or user input
+new_data = {
+    'time_of_day_hour': [8],
+    'speed_limit_mph': [60],
+    'num_vehicles_involved': [2],
+    'road_type_Rural Road': [0], # Example: not a rural road
+    'road_type_Urban Street': [0], # Example: not an urban street (so implicitly Highway)
+    'weather_condition_Foggy': [0],
+    'weather_condition_Rainy': [1], # Example: Rainy
+    'weather_condition_Snowy': [0],
+    'junction_type_None': [0],
+    'junction_type_Roundabout': [0],
+    'junction_type_T-Junction': [0],
+    'driver_age_group_>50': [0],
+    'driver_age_group_<25': [0] # Example: 25-50 age group
+}
+
+# Ensure all columns from training data are present, fill missing with 0 for one-hot encoded
+# A more robust approach would be to use a pipeline with ColumnTransformer
+new_data_df = pd.DataFrame(new_data)
+# Reindex to ensure all columns present and in correct order as in X_train
+for col in X.columns:
+    if col not in new_data_df.columns:
+        new_data_df[col] = 0
+new_data_df = new_data_df[X.columns]
+
+
+# Predict
+predicted_severity_encoded = model.predict(new_data_df)[0]
+predicted_severity_proba = model.predict_proba(new_data_df)[0]
+
+# Map back to original severity labels
+reverse_severity_mapping = {v: k for k, v in severity_mapping.items()}
+predicted_severity_label = reverse_severity_mapping[predicted_severity_encoded]
+
+print(f"\nNew data point features:\n{new_data_df.iloc[0].to_dict()}")
+print(f"Predicted Severity: {predicted_severity_label}")
+print(f"Prediction Probabilities (Minor, Serious, Fatal): {predicted_severity_proba}")
+
+# Outputting actionable insights
+if predicted_severity_encoded == 2:
+    print("\n--- ALERT: HIGH RISK OF FATAL ACCIDENT! ---")
+    print("Immediate action required: Notify emergency services and relevant authorities.")
+elif predicted_severity_encoded == 1:
+    print("\n--- WARNING: HIGH RISK OF SERIOUS ACCIDENT! ---")
+    print("Consider traffic management adjustments or driver advisories.")
+else:
+    print("\n--- LOW RISK OF SERIOUS ACCIDENT ---")
+    print("Continue monitoring traffic conditions.")
